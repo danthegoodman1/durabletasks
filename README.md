@@ -4,6 +4,8 @@ A lightweight durable execution framework for JS/TS that allows you to bring you
 
 This is designed to be run on a single node. Distributed processing of tasks can be managed outside of this (e.g. using a shared pool for WorkflowRunners).
 
+It's simple. It works. Used in production at scale at [Tangia](https://www.tangia.co).
+
 ## Usage
 
 `Workflow`s run one or more `Task`s. They do so via registered `TaskRunner`s.
