@@ -15,10 +15,6 @@ interface WorkflowTask<T extends TaskFunction> {
   data: ParamsOf<T>
 }
 
-interface AddWorkflowParams<T extends TaskFunction[]> {
-  tasks: { [K in keyof T]: WorkflowTask<T[K]> }
-}
-
 export interface WorkflowRow {
   id: string
   status: "pending" | "completed" | "failed"
