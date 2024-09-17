@@ -173,88 +173,86 @@ export class WorkflowRunner {
           this.logger?.debug(
             `WKFL=${workflow.id} TASK=${task.seq} executing task`
           )
-          const result = await this.taskRunners[task.task_name].Execute({
-            attempt: attempts,
-            data: task.data ? JSON.parse(task.data) : null,
-            seq: task.seq,
-            workflowID: workflow.id,
-            preparedData: prepared[task.task_name],
-          })
-          if (result.error) {
-            if (result.error instanceof ExpectedError) {
-              this.logger?.info(
+          try {
+            const result = await this.taskRunners[task.task_name].Execute({
+              attempt: attempts,
+              data: task.data ? JSON.parse(task.data) : null,
+              seq: task.seq,
+              workflowID: workflow.id,
+              preparedData: prepared[task.task_name],
+            })
+
+            // Completed
+            this.logger?.info(
+              `WKFL=${workflow.id} TASK=${task.seq} task completed`
+            )
+            await this.storage.updateWorkflowTaskStatus(
+              workflow.id,
+              task.seq,
+              "completed",
+              {
+                data: result.data,
+              }
+            )
+            break
+          } catch (error) {
+            if (error instanceof ExpectedError) {
+              this.logger?.warn(
                 {
-                  err: extractError(result.error),
+                  err: extractError(error),
                 },
                 `WKFL=${workflow.id} TASK=${task.seq} expected task execution error`
               )
+              switch (error.abort) {
+                case "workflow":
+                  this.logger?.warn(
+                    `WKFL=${workflow.id} TASK=${task.seq} failing workflow and task`
+                  )
+                  await this.storage.updateWorkflowTaskStatus(
+                    workflow.id,
+                    task.seq,
+                    "failed",
+                    {
+                      errorMessage: error.message,
+                    },
+                    "failed"
+                  )
+                  return // we are done processing, exit
+                case "task":
+                  this.logger?.info(
+                    `WKFL=${workflow.id} TASK=${task.seq} failing task`
+                  )
+                  await this.storage.updateWorkflowTaskStatus(
+                    workflow.id,
+                    task.seq,
+                    "failed",
+                    {
+                      errorMessage: error.message,
+                    }
+                  )
+                  break // we can break to the next task
+                default:
+                  this.logger?.error(
+                    `WKFL=${workflow.id} TASK=${task.seq} unknown abort type, treating as unexpected error`
+                  )
+              }
             } else {
               this.logger?.error(
                 {
-                  err: extractError(result.error),
-                  abort: result.abort,
+                  err: extractError(error),
                 },
-                `WKFL=${workflow.id} TASK=${task.seq} task execution error`
+                `WKFL=${workflow.id} TASK=${task.seq} unexpected task execution error`
               )
-            }
-            if (result.abort === "workflow") {
-              this.logger?.warn(`WKFL=${workflow.id} failing workflow`)
-              await this.storage.updateWorkflowStatus(workflow.id, "failed")
-              this.logger?.info(
-                `WKFL=${workflow.id} TASK=${task.seq} failing task`
-              )
-              await this.storage.updateWorkflowTaskStatus(
-                workflow.id,
-                task.seq,
-                "failed",
-                {
-                  errorMessage: result.error.message,
-                  data: result.data,
-                }
-              )
-              return // we are done processing, exit
-            }
-            if (
-              result.abort === "task" ||
-              result.error instanceof ExpectedError
-            ) {
-              this.logger?.info(
-                `WKFL=${workflow.id} TASK=${task.seq} failing task`
-              )
-              await this.storage.updateWorkflowTaskStatus(
-                workflow.id,
-                task.seq,
-                "failed",
-                {
-                  errorMessage: result.error.message,
-                  data: result.data,
-                }
-              )
-              break
             }
 
             // sleep and retry
             await new Promise((r) => setTimeout(r, this.retryDelayMS))
             attempts += 1
-            this.logger?.debug(
-              `WKFL=${workflow.id} TASK=${task.seq} retrying task`
+            this.logger?.warn(
+              `WKFL=${workflow.id} TASK=${task.seq} retrying failed task`
             )
             continue
           }
-
-          // Completed
-          this.logger?.info(
-            `WKFL=${workflow.id} TASK=${task.seq} task completed`
-          )
-          await this.storage.updateWorkflowTaskStatus(
-            workflow.id,
-            task.seq,
-            "completed",
-            {
-              data: result.data,
-            }
-          )
-          break
         }
       }
     } catch (error) {

@@ -4,9 +4,25 @@ import { WorkflowRow, WorkflowTaskRow } from "../workflows"
 
 export class SQLiteStorageProvider implements StorageProvider {
   private db: Database
+  private workflowsTable: string
+  private workflowTasksTable: string
 
-  constructor(db: Database) {
+  constructor(
+    db: Database,
+    options: {
+      /**
+       * Is not SQL injection resistant.
+       */
+      workflowsTable: string
+      /**
+       * Is not SQL injection resistant.
+       */
+      workflowTasksTable: string
+    }
+  ) {
     this.db = db
+    this.workflowsTable = options.workflowsTable
+    this.workflowTasksTable = options.workflowTasksTable
   }
 
   async init(): Promise<void> {
@@ -17,14 +33,14 @@ export class SQLiteStorageProvider implements StorageProvider {
 
   private async createTables(): Promise<void> {
     await this.db.exec(`
-      create table if not exists workflows (
+      create table if not exists ${this.workflowsTable} (
         id text primary key,
         status text not null,
         created_ms integer not null,
         updated_ms integer not null
       );
 
-      create table if not exists workflow_tasks (
+      create table if not exists ${this.workflowTasksTable} (
         id integer primary key autoincrement,
         workflow_id text not null,
         task_name text not null,
@@ -35,22 +51,22 @@ export class SQLiteStorageProvider implements StorageProvider {
         error text,
         created_ms integer not null,
         updated_ms integer not null,
-        foreign key (workflow_id) references workflows(id)
+        foreign key (workflow_id) references ${this.workflowsTable}(id)
       );
     `)
   }
 
   private async createIndexes(): Promise<void> {
     await this.db.exec(`
-      create index if not exists idx_workflows_status on workflows(status);
-      create index if not exists idx_workflow_tasks_workflow_id on workflow_tasks(workflow_id);
-      create index if not exists idx_workflow_tasks_status on workflow_tasks(status);
+      create index if not exists idx_${this.workflowsTable}_status on ${this.workflowsTable}(status);
+      create index if not exists idx_${this.workflowTasksTable}_workflow_id on ${this.workflowTasksTable}(workflow_id);
+      create index if not exists idx_${this.workflowTasksTable}_status on ${this.workflowTasksTable}(status);
     `)
   }
 
   async getPendingWorkflows(): Promise<WorkflowRow[]> {
     return this.db.all<WorkflowRow[]>(
-      "select * from workflows where status = ?",
+      `select * from ${this.workflowsTable} where status = ?`,
       ["pending"]
     )
   }
@@ -60,7 +76,7 @@ export class SQLiteStorageProvider implements StorageProvider {
   ): Promise<WorkflowTaskRow | undefined | null> {
     return await this.db.get<WorkflowTaskRow>(
       `
-      select * from workflow_tasks
+      select * from ${this.workflowTasksTable}
       where workflow_id = ? and status = 'pending'
       order by seq asc
       limit 1
@@ -74,7 +90,7 @@ export class SQLiteStorageProvider implements StorageProvider {
     status: "pending" | "completed" | "failed"
   ): Promise<void> {
     await this.db.run(
-      "update workflows set status = ?, updated_ms = ? where id = ?",
+      `update ${this.workflowsTable} set status = ?, updated_ms = ? where id = ?`,
       [status, Date.now(), workflowID]
     )
   }
@@ -86,23 +102,39 @@ export class SQLiteStorageProvider implements StorageProvider {
     result: {
       data?: any
       errorMessage?: string
-    }
+    },
+    workflowStatus?: "pending" | "completed" | "failed"
   ): Promise<void> {
-    await this.db.run(
-      `
-      update workflow_tasks
-      set status = ?, return = ?, error = ?, updated_ms = ?
-      where workflow_id = ? and seq = ?
-    `,
-      [
-        status,
-        result.data ? JSON.stringify(result.data) : null,
-        result.errorMessage,
-        Date.now(),
-        workflowID,
-        seq,
-      ]
-    )
+    await this.db.run("begin transaction")
+    try {
+      await this.db.run(
+        `
+        update ${this.workflowTasksTable}
+        set status = ?, return = ?, error = ?, updated_ms = ?
+        where workflow_id = ? and seq = ?
+      `,
+        [
+          status,
+          result.data ? JSON.stringify(result.data) : null,
+          result.errorMessage,
+          Date.now(),
+          workflowID,
+          seq,
+        ]
+      )
+
+      if (workflowStatus) {
+        await this.db.run(
+          `update ${this.workflowsTable} set status = ?, updated_ms = ? where id = ?`,
+          [workflowStatus, Date.now(), workflowID]
+        )
+      }
+
+      await this.db.run("commit")
+    } catch (error) {
+      await this.db.run("rollback")
+      throw error
+    }
   }
 
   async deleteOldWorkflowsAndTasks(olderThanMS: number): Promise<void> {
@@ -110,12 +142,13 @@ export class SQLiteStorageProvider implements StorageProvider {
     await this.db.run("begin transaction")
     try {
       await this.db.run(
-        "delete from workflow_tasks where workflow_id in (select id from workflows where created_ms < ?)",
+        `delete from ${this.workflowTasksTable} where workflow_id in (select id from ${this.workflowsTable} where created_ms < ?)`,
         [cutoffTime]
       )
-      await this.db.run("delete from workflows where created_ms < ?", [
-        cutoffTime,
-      ])
+      await this.db.run(
+        `delete from ${this.workflowsTable} where created_ms < ?`,
+        [cutoffTime]
+      )
       await this.db.run("commit")
     } catch (error) {
       await this.db.run("rollback")
@@ -132,7 +165,7 @@ export class SQLiteStorageProvider implements StorageProvider {
   ): Promise<WorkflowRow> {
     // Check if the workflow already exists
     const existingWorkflow = await this.db.get<WorkflowRow>(
-      "select * from workflows where id = ?",
+      `select * from ${this.workflowsTable} where id = ?`,
       [workflow.id]
     )
 
@@ -145,14 +178,14 @@ export class SQLiteStorageProvider implements StorageProvider {
     await this.db.run("begin transaction")
     try {
       await this.db.run(
-        "insert into workflows (id, status, created_ms, updated_ms) values (?, ?, ?, ?)",
+        `insert into ${this.workflowsTable} (id, status, created_ms, updated_ms) values (?, ?, ?, ?)`,
         [workflow.id, workflow.status, now, now]
       )
 
       for (const task of tasks) {
         await this.db.run(
           `
-          insert into workflow_tasks (workflow_id, task_name, seq, status, data, created_ms, updated_ms)
+          insert into ${this.workflowTasksTable} (workflow_id, task_name, seq, status, data, created_ms, updated_ms)
           values (?, ?, ?, ?, ?, ?, ?)
         `,
           [

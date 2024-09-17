@@ -24,7 +24,11 @@ export interface StorageProvider {
     result: {
       data?: any
       errorMessage?: string
-    }
+    },
+    /**
+     * If provided, the workflow status will be updated to this as well. This must be done atomically.
+     */
+    workflowStatus?: "pending" | "completed" | "failed"
   ): Promise<void>
 
   deleteOldWorkflowsAndTasks(olderThanMS: number): Promise<void>
