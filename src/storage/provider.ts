@@ -1,9 +1,16 @@
 import { WorkflowRow, WorkflowTaskRow } from "../workflows"
 
 export interface StorageProvider {
+  /**
+   * Run any setup code for the storage provider, such as creating tables.
+   */
+  init(): Promise<void>
+
   getPendingWorkflows(): Promise<WorkflowRow[]>
 
-  getNextWorkflowTask(workflowID: string): Promise<WorkflowTaskRow | null>
+  getNextWorkflowTask(
+    workflowID: string
+  ): Promise<WorkflowTaskRow | null | undefined>
 
   updateWorkflowStatus(
     workflowID: string,
@@ -26,9 +33,11 @@ export interface StorageProvider {
    * You must generate a new ID for the workflow and tasks. The workflow and tasks should all be inserted atomically.
    *
    * You must insert a full {@link WorkflowRow} and one or more {@link WorkflowTaskRow}
+   *
+   * Should be an idempotent operation, such that if a workflow with the same ID is inserted, it will return the existing workflow.
    */
   insertWorkflowAndTasks(
-    workflow: Omit<WorkflowRow, "id" | "created_ms" | "updated_ms">,
+    workflow: Omit<WorkflowRow, "created_ms" | "updated_ms">,
     tasks: Omit<
       WorkflowTaskRow,
       "id" | "created_ms" | "updated_ms" | "error" | "return" | "workflow_id"

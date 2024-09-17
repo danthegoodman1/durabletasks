@@ -52,6 +52,18 @@ await workflowRunner.addWorkflow({
 
 The workflow will start executing these immediately on the local machine after it has durably stored the information.
 
+## Strategies and Tricks
+
+### ID generation
+
+This package is not opinionated about how you generate IDs, requiring that you provide unique workflow IDs.
+
+It is generally best to make these completely random, and not sorted in the time dimension, to work well with all databases for natural key-range distribution.
+
+### Spawn new workflows from tasks
+
+Because workflow generation is idempotent, you can safely spawn a workflow from a task, if the workflow ID is determinsitic (e.g. if the same task ran many times, it'd try to spawn a workflow with the same ID every time). For example you could use `${currentWorfklowID}-some_suffix`. The workflow ID is available in the `TaskExecutionContext`.
+
 ## Recovery
 
 When a workflow recovers, it starts off from the first incomplete task. This means that tasks can be executed more than once (if a task died moments between execution and storage).

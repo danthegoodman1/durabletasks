@@ -93,13 +93,20 @@ export class WorkflowRunner {
     }
   }
 
-  async addWorkflow<T extends TaskFunction[]>(tasks: {
-    [K in keyof T]: WorkflowTask<T[K]>
-  }): Promise<void> {
+  async addWorkflow<T extends TaskFunction[]>(
+    /**
+     * A unique ID for this workflow. Used for deduplication.
+     */
+    workflowID: string,
+    tasks: {
+      [K in keyof T]: WorkflowTask<T[K]>
+    }
+  ): Promise<void> {
     this.logger?.info("adding workflow")
 
     const workflow = await this.storage.insertWorkflowAndTasks(
       {
+        id: workflowID,
         status: "pending",
       },
       Object.entries(tasks).map(([name, task], ind) => ({
