@@ -11,4 +11,3 @@ You can create your own storage provider by implementing the `StorageProvider` i
 `durabletasks/storage/sqlite`
 
 Use a SQLite table for storage.
-# durabletasks

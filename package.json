@@ -1,0 +1,27 @@
+{
+  "name": "durabletasks",
+  "version": "0.0.1",
+  "description": "",
+  "main": "dist/index.js",
+  "repository": {
+    "url": "https://github.com/danthegoodman1/durabletasks"
+  },
+  "homepage": "https://github.com/danthegoodman1/durabletasks",
+  "scripts": {
+    "build": "tsc"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/react": "^18.2.48",
+    "@types/uuid": "^9.0.8",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "tslib": "^2.6.2",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "uuid": "^9.0.1"
+  }
+}
