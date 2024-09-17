@@ -16,13 +16,11 @@ interface WorkflowTask<T extends TaskFunction> {
 }
 
 interface AddWorkflowParams<T extends TaskFunction[]> {
-  name: string
   tasks: { [K in keyof T]: WorkflowTask<T[K]> }
 }
 
 export interface WorkflowRow {
   id: string
-  name: string
   status: "pending" | "completed" | "failed"
   created_ms: number
   updated_ms: number
@@ -95,17 +93,16 @@ export class WorkflowRunner {
     }
   }
 
-  async addWorkflow<T extends TaskFunction[]>(
-    params: AddWorkflowParams<T>
-  ): Promise<void> {
+  async addWorkflow<T extends TaskFunction[]>(tasks: {
+    [K in keyof T]: WorkflowTask<T[K]>
+  }): Promise<void> {
     this.logger?.info("adding workflow")
 
     const workflow = await this.storage.insertWorkflowAndTasks(
       {
-        name: params.name,
         status: "pending",
       },
-      Object.entries(params.tasks).map(([name, task], ind) => ({
+      Object.entries(tasks).map(([name, task], ind) => ({
         task_name: name,
         seq: ind,
         status: "pending",
@@ -137,10 +134,6 @@ export class WorkflowRunner {
               "completed"
             )
           }
-          // const taskLogger = this.logger?.child({
-          //   seq: task.seq,
-          //   attempts,
-          // })
           if (!this.taskRunners[task.task_name]) {
             this.logger?.error(
               {
