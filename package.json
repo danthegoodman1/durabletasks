@@ -8,7 +8,8 @@
   },
   "homepage": "https://github.com/danthegoodman1/durabletasks",
   "scripts": {
-    "build": "tsc"
+    "build": "tsc",
+    "test": "vitest"
   },
   "keywords": [],
   "author": "",
@@ -19,9 +20,13 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "tslib": "^2.6.2",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "uuid": "^10.0.0",
+    "vitest": "^2.1.1"
   },
   "dependencies": {
+    "@types/node": "^22.5.5",
+    "async-mutex": "^0.5.0",
     "sqlite": "^5.1.1",
     "sqlite3": "^5.1.7"
   }

@@ -1,11 +1,13 @@
 import { Database } from "sqlite"
 import { StorageProvider } from "./provider"
 import { WorkflowRow, WorkflowTaskRow } from "../workflows"
+import { Mutex } from "async-mutex"
 
 export class SQLiteStorageProvider implements StorageProvider {
   private db: Database
   private workflowsTable: string
   private workflowTasksTable: string
+  private mutex: Mutex
 
   constructor(
     db: Database,
@@ -23,6 +25,7 @@ export class SQLiteStorageProvider implements StorageProvider {
     this.db = db
     this.workflowsTable = options.workflowsTable
     this.workflowTasksTable = options.workflowTasksTable
+    this.mutex = new Mutex()
   }
 
   async init(): Promise<void> {
@@ -105,55 +108,59 @@ export class SQLiteStorageProvider implements StorageProvider {
     },
     workflowStatus?: "pending" | "completed" | "failed"
   ): Promise<void> {
-    await this.db.run("begin transaction")
-    try {
-      await this.db.run(
-        `
-        update ${this.workflowTasksTable}
-        set status = ?, return = ?, error = ?, updated_ms = ?
-        where workflow_id = ? and seq = ?
-      `,
-        [
-          status,
-          result.data ? JSON.stringify(result.data) : null,
-          result.errorMessage,
-          Date.now(),
-          workflowID,
-          seq,
-        ]
-      )
-
-      if (workflowStatus) {
+    await this.mutex.runExclusive(async () => {
+      await this.db.run("begin transaction")
+      try {
         await this.db.run(
-          `update ${this.workflowsTable} set status = ?, updated_ms = ? where id = ?`,
-          [workflowStatus, Date.now(), workflowID]
+          `
+          update ${this.workflowTasksTable}
+          set status = ?, return = ?, error = ?, updated_ms = ?
+          where workflow_id = ? and seq = ?
+        `,
+          [
+            status,
+            result.data ? JSON.stringify(result.data) : null,
+            result.errorMessage,
+            Date.now(),
+            workflowID,
+            seq,
+          ]
         )
-      }
 
-      await this.db.run("commit")
-    } catch (error) {
-      await this.db.run("rollback")
-      throw error
-    }
+        if (workflowStatus) {
+          await this.db.run(
+            `update ${this.workflowsTable} set status = ?, updated_ms = ? where id = ?`,
+            [workflowStatus, Date.now(), workflowID]
+          )
+        }
+
+        await this.db.run("commit")
+      } catch (error) {
+        await this.db.run("rollback")
+        throw error
+      }
+    })
   }
 
   async deleteOldWorkflowsAndTasks(olderThanMS: number): Promise<void> {
-    const cutoffTime = Date.now() - olderThanMS
-    await this.db.run("begin transaction")
-    try {
-      await this.db.run(
-        `delete from ${this.workflowTasksTable} where workflow_id in (select id from ${this.workflowsTable} where created_ms < ?)`,
-        [cutoffTime]
-      )
-      await this.db.run(
-        `delete from ${this.workflowsTable} where created_ms < ?`,
-        [cutoffTime]
-      )
-      await this.db.run("commit")
-    } catch (error) {
-      await this.db.run("rollback")
-      throw error
-    }
+    await this.mutex.runExclusive(async () => {
+      const cutoffTime = Date.now() - olderThanMS
+      await this.db.run("begin transaction")
+      try {
+        await this.db.run(
+          `delete from ${this.workflowTasksTable} where workflow_id in (select id from ${this.workflowsTable} where created_ms < ?)`,
+          [cutoffTime]
+        )
+        await this.db.run(
+          `delete from ${this.workflowsTable} where created_ms < ?`,
+          [cutoffTime]
+        )
+        await this.db.run("commit")
+      } catch (error) {
+        await this.db.run("rollback")
+        throw error
+      }
+    })
   }
 
   async insertWorkflowAndTasks(
@@ -163,54 +170,56 @@ export class SQLiteStorageProvider implements StorageProvider {
       "id" | "created_ms" | "updated_ms" | "error" | "return" | "workflow_id"
     >[]
   ): Promise<WorkflowRow> {
-    // Check if the workflow already exists
-    const existingWorkflow = await this.db.get<WorkflowRow>(
-      `select * from ${this.workflowsTable} where id = ?`,
-      [workflow.id]
-    )
-
-    if (existingWorkflow) {
-      return existingWorkflow
-    }
-
-    const now = Date.now()
-
-    await this.db.run("begin transaction")
-    try {
-      await this.db.run(
-        `insert into ${this.workflowsTable} (id, status, created_ms, updated_ms) values (?, ?, ?, ?)`,
-        [workflow.id, workflow.status, now, now]
+    return await this.mutex.runExclusive(async () => {
+      // Check if the workflow already exists
+      const existingWorkflow = await this.db.get<WorkflowRow>(
+        `select * from ${this.workflowsTable} where id = ?`,
+        [workflow.id]
       )
 
-      for (const task of tasks) {
-        await this.db.run(
-          `
-          insert into ${this.workflowTasksTable} (workflow_id, task_name, seq, status, data, created_ms, updated_ms)
-          values (?, ?, ?, ?, ?, ?, ?)
-        `,
-          [
-            workflow.id,
-            task.task_name,
-            task.seq,
-            task.status,
-            task.data,
-            now,
-            now,
-          ]
-        )
+      if (existingWorkflow) {
+        return existingWorkflow
       }
 
-      await this.db.run("commit")
-    } catch (error) {
-      await this.db.run("rollback")
-      throw error
-    }
+      const now = Date.now()
 
-    return {
-      id: workflow.id,
-      status: workflow.status,
-      created_ms: now,
-      updated_ms: now,
-    }
+      await this.db.run("begin transaction")
+      try {
+        await this.db.run(
+          `insert into ${this.workflowsTable} (id, status, created_ms, updated_ms) values (?, ?, ?, ?)`,
+          [workflow.id, workflow.status, now, now]
+        )
+
+        for (const task of tasks) {
+          await this.db.run(
+            `
+            insert into ${this.workflowTasksTable} (workflow_id, task_name, seq, status, data, created_ms, updated_ms)
+            values (?, ?, ?, ?, ?, ?, ?)
+          `,
+            [
+              workflow.id,
+              task.task_name,
+              task.seq,
+              task.status,
+              task.data,
+              now,
+              now,
+            ]
+          )
+        }
+
+        await this.db.run("commit")
+      } catch (error) {
+        await this.db.run("rollback")
+        throw error
+      }
+
+      return {
+        id: workflow.id,
+        status: workflow.status,
+        created_ms: now,
+        updated_ms: now,
+      }
+    })
   }
 }
