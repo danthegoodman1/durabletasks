@@ -3,6 +3,9 @@ import { StorageProvider } from "./provider"
 import { WorkflowRow, WorkflowTaskRow } from "../workflows"
 import { Mutex } from "async-mutex"
 
+/**
+ * SQLite storage provider. This uses a single shared connection to the database, rather than opening and closing connections for each operation, which is more efficient as operations are generally back-to-back, and don't need to run with as high concurrency as synchronous operations.
+ */
 export class SQLiteStorageProvider implements StorageProvider {
   private db: Database
   private workflowsTable: string
